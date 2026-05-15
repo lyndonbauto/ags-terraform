@@ -36,6 +36,21 @@ variable "aws_region" {
   type = string
 }
 
+variable "route_table_ids" {
+  type    = list(string)
+  default = []
+}
+
+variable "acknowledge_full_vpc_routing" {
+  type    = bool
+  default = false
+
+  validation {
+    condition     = length(var.route_table_ids) > 0 || var.acknowledge_full_vpc_routing
+    error_message = "Set acknowledge_full_vpc_routing=true when route_table_ids is empty, or provide explicit route_table_ids."
+  }
+}
+
 provider "aws" {
   region = var.aws_region
 }
@@ -45,11 +60,17 @@ locals {
   common_tags = {
     Customer    = var.customer
     Environment = var.environment
+    ManagedBy   = "omnistrate"
+    Purpose     = "ags-peering"
   }
 }
 
 data "aws_route_tables" "all" {
   vpc_id = var.vpc_id
+}
+
+locals {
+  target_route_table_ids = length(var.route_table_ids) > 0 ? var.route_table_ids : data.aws_route_tables.all.ids
 }
 
 resource "aws_vpc_peering_connection_accepter" "this" {
@@ -63,7 +84,7 @@ resource "aws_vpc_peering_connection_accepter" "this" {
 }
 
 resource "aws_route" "peer" {
-  for_each                  = toset(data.aws_route_tables.all.ids)
+  for_each                  = toset(local.target_route_table_ids)
   route_table_id            = each.value
   destination_cidr_block    = var.peer_vpc_cidr
   vpc_peering_connection_id = var.peering_id
@@ -85,5 +106,5 @@ output "peering_status" {
 }
 
 output "peering_route_table_ids" {
-  value = data.aws_route_tables.all.ids
+  value = local.target_route_table_ids
 }

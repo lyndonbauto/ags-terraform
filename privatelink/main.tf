@@ -5,10 +5,6 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.0"
     }
-    time = {
-      source  = "hashicorp/time"
-      version = ">= 0.11"
-    }
   }
 }
 
@@ -37,6 +33,11 @@ variable "aws_region" {
   type = string
 }
 
+variable "nlb_arn" {
+  type    = string
+  default = ""
+}
+
 provider "aws" {
   region = var.aws_region
 }
@@ -52,22 +53,26 @@ locals {
   }
 }
 
-resource "time_sleep" "wait_for_load_balancer" {
-  create_duration = "90s"
-}
-
 data "aws_lb" "ags" {
+  count = var.nlb_arn == "" ? 1 : 0
+
   tags = {
     GraphServiceId = var.graph_service_id
     Purpose        = "ags-gremlin"
   }
+}
 
-  depends_on = [time_sleep.wait_for_load_balancer]
+locals {
+  selected_nlb_arn = var.nlb_arn != "" ? var.nlb_arn : one(data.aws_lb.ags[*].arn)
+}
+
+data "aws_lb" "selected" {
+  arn = local.selected_nlb_arn
 }
 
 resource "aws_vpc_endpoint_service" "ags" {
   acceptance_required        = true
-  network_load_balancer_arns = [data.aws_lb.ags.arn]
+  network_load_balancer_arns = [local.selected_nlb_arn]
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-ags-privatelink"
@@ -101,5 +106,5 @@ output "privatelink_allowed_principal" {
 }
 
 output "privatelink_nlb_dns_name" {
-  value = data.aws_lb.ags.dns_name
+  value = data.aws_lb.selected.dns_name
 }
